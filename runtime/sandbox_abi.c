@@ -270,18 +270,21 @@ static void read_clock(struct GuestVariant *ret, const struct GuestVariant *whic
     call_singleton0(clocks[i].obj, clocks[i].on, clocks[i].method, clocks[i].mn, ret);
     as_float(ret);
 }
-/* read_object(object, which) reads get_frames_available (0) from an object the host passes in. */
-static void read_object(struct GuestVariant *ret, const struct GuestVariant *obj) {
-    long h;
+/* read_object(object, which) calls a no-argument method on an object the host passes in:
+ * 0 get_frames_available, 1 get_pushed_frames, 2 get_discarded_frames. */
+static void read_object(struct GuestVariant *ret, const struct GuestVariant *obj, const struct GuestVariant *which) {
+    long h, w;
     ret->type = VARIANT_NIL;
-    if (sandbox_variant_get_object(obj, &h)) return;
-    call0(h, "get_frames_available", 20, ret);
+    if (sandbox_variant_get_object(obj, &h) || sandbox_variant_get_int(which, &w)) return;
+    if (w == 0) call0(h, "get_frames_available", 20, ret);
+    else if (w == 1) call0(h, "get_pushed_frames", 17, ret);
+    else if (w == 2) call0(h, "get_discarded_frames", 20, ret);
     as_float(ret);
 }
 
 void sandbox_register_api(void) {
     sandbox_add_function("read_clock", 10, (void *)read_clock, "float", "int which");
-    sandbox_add_function("read_object", 11, (void *)read_object, "float", "Object o");
+    sandbox_add_function("read_object", 11, (void *)read_object, "float", "Object o, int which");
     if (mojo_suspend_start) {
         sandbox_add_function("suspend_start", 13, (void *)suspend_start, "int", "int ns");
         sandbox_add_function("suspend_elapsed", 15, (void *)suspend_elapsed, "int", "");

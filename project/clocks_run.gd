@@ -65,25 +65,44 @@ func _initialize() -> void:
 		# Counters and constants cannot change inside one frame, so the two reads must be equal.
 		if i in [1, 2, 3, 4, 5, 6, 9]:
 			check("guest equals host for " + NAMES[i], ok and g == h, "guest %s host %s" % [g, h])
-	var obj_val = sb.vmcall("read_object", pb)
+	var obj_val = sb.vmcall("read_object", pb, 0)
 	print("%s %-38s guest=%s host=%s" % ["READ " if obj_val is float else "DENIED", "AudioStreamGeneratorPlayback.get_frames_available", obj_val, pb.get_frames_available()])
+
+	# DSP time from AudioEffectCapture: pushed + discarded frames is the frames the mixer has run
+	# through the bus, so it needs no player and no top-up.
+	var bus_idx := AudioServer.bus_count
+	AudioServer.add_bus()
+	var cap := AudioEffectCapture.new()
+	AudioServer.add_bus_effect(bus_idx, cap)
+	await process_frame
+	await process_frame
+	var cap_pushed = sb.vmcall("read_object", cap, 1)
+	var cap_discarded = sb.vmcall("read_object", cap, 2)
+	print("%s %-38s guest=%s+%s host=%s+%s" % ["READ " if cap_pushed is float and cap_discarded is float else "DENIED", "AudioEffectCapture pushed+discarded", cap_pushed, cap_discarded, cap.get_pushed_frames(), cap.get_discarded_frames()])
+	check("guest reads capture counters", cap_pushed is float and cap_discarded is float, "got %s %s" % [cap_pushed, cap_discarded])
+	var cap_before: float = sb.vmcall("read_object", cap, 1) + sb.vmcall("read_object", cap, 2)
 
 	print("-- stall: the main thread sleeps 300 ms inside one frame")
 	var before := {}
 	for i in [0, 1, 2, 3, 7]:
 		before[i] = sb.vmcall("read_clock", i)
-	var avail_before = sb.vmcall("read_object", pb)
+	var avail_before = sb.vmcall("read_object", pb, 0)
 	OS.delay_msec(300)
 	print("%-38s %s" % ["clock", "guest-read change over the stall"])
 	for i in [0, 1, 2, 3, 7]:
 		var after = sb.vmcall("read_clock", i)
 		print("%-38s %s" % [NAMES[i], after - before[i]])
-	var avail_after = sb.vmcall("read_object", pb)
+	var avail_after = sb.vmcall("read_object", pb, 0)
 	var after_ticks = sb.vmcall("read_clock", 0)
 	check("wall clock followed the 300 ms stall", after_ticks - before[0] >= 300000.0, "got %s" % [after_ticks - before[0]])
 	for i in [1, 2, 3]:
 		check("%s did not move in the stall" % NAMES[i], sb.vmcall("read_clock", i) == before[i], "moved")
 	check("audio device kept consuming through the stall", avail_after - avail_before > 0, "got %s" % [avail_after - avail_before])
+	var cap_after: float = sb.vmcall("read_object", cap, 1) + sb.vmcall("read_object", cap, 2)
+	var rate: float = sb.vmcall("read_clock", 6)
+	print("%-38s %s frames = %.1f ms of DSP time, computed in the guest" % ["capture frames over the stall", cap_after - cap_before, (cap_after - cap_before) / rate * 1000.0])
+	check("capture DSP time advanced through the stall", cap_after - cap_before > 0.0, "got %s" % [cap_after - cap_before])
+	check("capture advances in whole mix chunks", int(cap_after - cap_before) % 512 == 0, "got %s" % [cap_after - cap_before])
 	print("RESULT: ", failed, " falsified")
 	print("%-38s %s frames (generator buffer drained = audio device advanced %.1f ms)" % ["generator frames consumed", avail_after - avail_before, (avail_after - avail_before) / 48.0])
 	quit(failed)
