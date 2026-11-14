@@ -148,6 +148,18 @@ static long noted[2] = { -1, -1 };
 void sandbox_note(long i, long v) { noted[i] = v; }
 long sandbox_noted(long i) { return noted[i]; }
 
+/* Calls a method with no arguments on a named singleton or on an object handle and returns its
+ * Variant. The type is left NIL when the host refuses. */
+static void call0(long handle, const char *method, size_t n, struct GuestVariant *ret) {
+    ret->type = VARIANT_NIL;
+    ecall7(ECALL_OBJ_CALLP, handle, (long)method, (long)n, 0, (long)ret, 0, 0);
+}
+static void call_singleton0(const char *name, size_t nn, const char *method, size_t mn, struct GuestVariant *ret) {
+    long h = ecall4(ECALL_GET_OBJ, (long)name, (long)nn, 0, 0);
+    ret->type = VARIANT_NIL;
+    if (h != 0) call0(h, method, mn, ret);
+}
+
 int sandbox_variant_set_int(struct GuestVariant *v, long x) { v->type = VARIANT_INT; v->i = x; return 0; }
 int sandbox_variant_get_int(const struct GuestVariant *v, long *x) {
     if (v->type != VARIANT_INT) return -EINVAL_;
@@ -234,7 +246,42 @@ static void suspend_start(struct GuestVariant *ret, const struct GuestVariant *n
 }
 static void suspend_elapsed(struct GuestVariant *ret) { sandbox_variant_set_int(ret, mojo_suspend_elapsed()); }
 
+struct ClockDef { const char *obj; size_t on; const char *method; size_t mn; };
+static const struct ClockDef clocks[] = {
+    { "Time", 4, "get_ticks_usec", 14 },
+    { "Engine", 6, "get_physics_frames", 18 },
+    { "Engine", 6, "get_process_frames", 18 },
+    { "Engine", 6, "get_frames_drawn", 16 },
+    { "Engine", 6, "get_physics_ticks_per_second", 28 },
+    { "Engine", 6, "get_time_scale", 14 },
+    { "AudioServer", 11, "get_mix_rate", 12 },
+    { "AudioServer", 11, "get_time_since_last_mix", 23 },
+    { "AudioServer", 11, "get_time_to_next_mix", 20 },
+    { "AudioServer", 11, "get_output_latency", 18 },
+};
+static void as_float(struct GuestVariant *v) {
+    if (v->type == VARIANT_INT) { double d = (double)v->i; v->type = VARIANT_FLOAT; v->f = d; }
+}
+/* read_clock(which) reads one of the clocks above as a float; NIL if the host refuses. */
+static void read_clock(struct GuestVariant *ret, const struct GuestVariant *which) {
+    long i;
+    ret->type = VARIANT_NIL;
+    if (sandbox_variant_get_int(which, &i) || i < 0 || i >= (long)(sizeof clocks / sizeof clocks[0])) return;
+    call_singleton0(clocks[i].obj, clocks[i].on, clocks[i].method, clocks[i].mn, ret);
+    as_float(ret);
+}
+/* read_object(object, which) reads get_frames_available (0) from an object the host passes in. */
+static void read_object(struct GuestVariant *ret, const struct GuestVariant *obj) {
+    long h;
+    ret->type = VARIANT_NIL;
+    if (sandbox_variant_get_object(obj, &h)) return;
+    call0(h, "get_frames_available", 20, ret);
+    as_float(ret);
+}
+
 void sandbox_register_api(void) {
+    sandbox_add_function("read_clock", 10, (void *)read_clock, "float", "int which");
+    sandbox_add_function("read_object", 11, (void *)read_object, "float", "Object o");
     if (mojo_suspend_start) {
         sandbox_add_function("suspend_start", 13, (void *)suspend_start, "int", "int ns");
         sandbox_add_function("suspend_elapsed", 15, (void *)suspend_elapsed, "int", "");

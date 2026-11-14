@@ -84,6 +84,20 @@ defmodule Test do
     end
   end
 
+  defp run(["clocks"]) do
+    with {:ok, godot} <- env("GODOT"),
+         :ok <- build(),
+         {:ok, _} <- File.copy("build/guest.elf", "project/guest.elf") do
+      cmd(godot, ["--path", "project", "--import", "--quit-after", "5"])
+
+      {out, _} =
+        cmd(godot, ["--path", "project", "--script", "clocks_run.gd", "--quit-after", "2000"])
+
+      show(out, ~r/^(READ|DENIED|PASS|FAIL|RESULT)/)
+      judge(out, ["RESULT: 0 falsified"])
+    end
+  end
+
   defp run(["limits"]) do
     witness = witness()
 

@@ -49,6 +49,10 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 - A CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - A single-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for one; I did not run it. The double host refuses that build, which I did run.
 
+## Clocks the guest can read
+
+`read_clock(which)` reads, through the Sandbox host, `Time.get_ticks_usec`, `Engine`'s physics, process and draw frame counts, physics ticks per second and time scale, and `AudioServer`'s mix rate, time since last mix, time to next mix and output latency. `read_object(o)` calls `get_frames_available` on an object the host passes in, such as a silent `AudioStreamGenerator` playback, whose consumed frames are DSP time (`get_absolute_time` is not bound in the engine build). `pixi run test-clocks` reads each from the guest, checks counters equal the host's own read in the same frame, then stalls the main thread for 300 ms: the wall clock advances, the three frame counters do not move, and the generator keeps being consumed. Output latency reads 0.0 on CoreAudio.
+
 ## The limits as tests
 
 `pixi run test-limits` runs contract-witness-mojo properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout, `../../2-contract/witness-mojo` in a workspace or `WITNESS_REPO`). `pixi run test-hostlimits` runs GDScript checks in the Sandbox build, and the same witness properties inside it. A test that fails is a limit that still stands.
