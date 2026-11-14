@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "interactor-mojo-guest"
+abstract: "A Mojo program compiled to a static RISC-V 64 guest ELF, with a C syscall entry stub and a Unicorn test that runs it."
+type: software
+authors:
+  - family-names: "Lee"
+    given-names: "K. S. Ernest (iFire)"
+license: MIT
+repository-code: "https://github.com/V-Sekai-fire/interactor-mojo-guest"

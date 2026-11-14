@@ -1,0 +1,17 @@
+[workspace]
+name = "interactor-mojo-guest"
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+
+[dependencies]
+mojo-compiler = "==1.3.0.dev2026111316"
+clangxx = ">=18"
+lld = ">=18"
+python = "3.12.*"
+
+[pypi-dependencies]
+unicorn = ">=2.1.4, <3"
+
+[tasks]
+build = "./build.sh"
+test = { cmd = "python test/run_guest.py build/guest.elf", depends-on = ["build"] }
