@@ -11,7 +11,7 @@ Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link ste
 
 ## Public API
 
-`sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int` and `MojoGuest.echo(Variant value) -> Variant`, which takes int, bool, float, string or object back out unchanged. The host must set `unboxed_arguments = false`, because the C glue reads Variant pointers, not native registers. Registration is only legal during the host's initialization, which is when `main` runs.
+`sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int` and `MojoGuest.echo(Variant value) -> Variant`, which takes int, bool, float, string or object back out unchanged. `add_numbers` and `echo` need `unboxed_arguments = false`, because their glue reads Variant pointers. `add_numbers_native` needs it true: ints arrive raw in `a1` and `a2`. Registration is only legal during the host's initialization, which is when `main` runs.
 
 ## Build and run
 
@@ -44,7 +44,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 ## What this does not have
 
 - One worker by decision (n = 1), so tasks interleave but never run in parallel. `max.algorithm`'s `parallelize` does not build for a guest, because its multi-item branch enqueues onto a DeviceContext from the MAX driver. `src/guest_algorithm.mojo` is its one-worker path, which runs every item in order on the calling thread.
-- Native (unboxed) arguments to a `vmcall`. The host must set `unboxed_arguments = false`.
+- One ABI per sandbox. `add_numbers` and `echo` take boxed Variant pointers, so the host sets `unboxed_arguments = false`. `add_numbers_native` is the same function for a host with it set to true. Only that one function has a native form.
 - A `Wait_Timeout` that sleeps. With one worker it answers once the queue is empty.
 - A CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - A single-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for one; I did not run it. The double host refuses that build, which I did run.
@@ -64,7 +64,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 | Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, up to 50 tasks on one lock |
 | A second `vmcall` after the first (control) | repeated vmcall | passes |
 | `Wait_Timeout` does not sleep | waits its deadline | skipped: the clock does not advance in rvlinux or in the Sandbox build |
-| Native (unboxed) arguments | unboxed vmcall | red: returns null |
+| Native (unboxed) arguments | unboxed vmcall of `add_numbers_native` | passes |
 
 The Variant glue is in `runtime/sandbox_abi.c`. Bool, float and object travel in the payload. A string is created and fetched through the host's `ECALL_VCREATE` and `ECALL_VFETCH`. The string test needs `references_max` raised in the host, because each trial scopes one host variant and the default allows 100. `project/limits_run.gd` sets 20,000.
 

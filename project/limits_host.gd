@@ -37,7 +37,7 @@ func _init() -> void:
 	node.free()
 	sb.free()
 	var ub = make_sandbox(true)
-	var u = ub.vmcall("add_numbers", 3, 4)
+	var u = ub.vmcall("add_numbers_native", 3, 4)
 	check("unboxed vmcall", u == 7, "got %s" % [u])
 	ub.free()
 	print("RESULT: ", failed, " falsified of 8")

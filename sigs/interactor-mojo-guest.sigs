@@ -3,3 +3,4 @@
 # sandbox_register_api() in runtime/sandbox_abi.c in step.
 MojoGuest.add_numbers(int a, int b) -> int
 MojoGuest.echo(Variant value) -> Variant
+MojoGuest.add_numbers_native(int a, int b) -> int

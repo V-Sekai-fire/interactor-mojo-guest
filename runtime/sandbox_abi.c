@@ -162,7 +162,15 @@ static void echo(struct GuestVariant *ret, const struct GuestVariant *a) {
     else if (!sandbox_variant_get_string(a, buf, sizeof buf, &n)) sandbox_variant_set_string(ret, buf, n);
 }
 
+/* The same function for a host with unboxed_arguments = true: a0 is the return Variant and
+ * ints arrive raw in a1 and a2, not as Variant pointers. One sandbox uses one ABI, so this
+ * is a second name. */
+static void add_numbers_native(struct GuestVariant *ret, long a, long b) {
+    sandbox_variant_set_int(ret, mojo_add_numbers(a, b));
+}
+
 void sandbox_register_api(void) {
+    sandbox_add_function("add_numbers_native", 18, (void *)add_numbers_native, "int", "int a, int b");
     sandbox_add_function("add_numbers", 11, (void *)add_numbers, "int", "int a, int b");
     sandbox_add_function("echo", 4, (void *)echo, "Variant", "Variant value");
 }
