@@ -64,7 +64,22 @@ defmodule Test do
           cmd(godot, ["--path", "project", "--script", "limits_run.gd", "--quit-after", "300"])
 
         show(props, ~r/^(PASS|FAIL|SKIP|RESULT: \d)/)
-        judge(props, ["PASS Wait_Timeout waits its deadline", "RESULT: 0 falsified"])
+
+        with :ok <- judge(props, ["PASS Wait_Timeout waits its deadline", "RESULT: 0 falsified"]),
+             :ok <- build(["src/suspend.mojo", "suspend"]),
+             {:ok, _} <- File.copy("build/suspend.elf", "project/suspend.elf") do
+          {susp, _} =
+            cmd(godot, ["--path", "project", "--script", "suspend_run.gd", "--quit-after", "400"])
+
+          show(susp, ~r/^(PASS|FAIL|MEASURED|RESULT: \d)/)
+
+          judge(susp, [
+            "PASS start returns at once",
+            "PASS not done when start returns",
+            "PASS done after the host timer fires",
+            "RESULT: 0 falsified"
+          ])
+        end
       end
     end
   end

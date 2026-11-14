@@ -45,7 +45,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 
 - One worker by decision (n = 1), so tasks interleave but never run in parallel. `max.algorithm`'s `parallelize` does not build for a guest, because its multi-item branch enqueues onto a DeviceContext from the MAX driver. `src/guest_algorithm.mojo` is its one-worker path, which runs every item in order on the calling thread.
 - One ABI per sandbox. `add_numbers` and `echo` take boxed Variant pointers, so the host sets `unboxed_arguments = false`. `add_numbers_native` is the same function for a host with it set to true. Only that one function has a native form.
-- A `Wait_Timeout` that sleeps. It drains the queue, then polls Godot's `Time.get_ticks_usec` until the deadline, and every poll is charged to the instruction budget. The engine test sets `execution_timeout` to 0 (no limit) for that reason. Without a Sandbox host, as in rvlinux, it answers at once.
+- A `Wait_Timeout` that suspends. It drains the queue, then polls Godot's `Time.get_ticks_usec` until the deadline, and every poll is charged to the instruction budget, so the engine test sets `execution_timeout` to 0 (no limit). A guest that must not spend its budget waits by suspending instead: `src/suspend.mojo` has a coroutine that arms a one-shot host Timer and suspends through the runtime's `AndThen`. The `vmcall` returns, the Timer's timeout calls back into the guest, and the callback completes the chain and runs the queue. Nothing polls. The wake is as exact as a Godot Timer, which counts frames: 44, 52, 57 and 48 ms for a 50 ms request in four runs. The coroutine frame is leaked, and no task object holds it.
 - A CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - A single-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for one; I did not run it. The double host refuses that build, which I did run.
 
@@ -63,6 +63,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 | `parallelize` on one worker | visits each item once | passes |
 | Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, up to 50 tasks on one lock |
 | A second `vmcall` after the first (control) | repeated vmcall | passes |
+| A suspended wait costs no budget | `suspend_run.gd`: start returns at once, the guest is not done on return, done after the timer | passes in the Sandbox build, default budget |
 | `Wait_Timeout` waits its deadline on Godot's clock | waits its deadline | passes in the Sandbox build, skipped in rvlinux, which has no host clock |
 | Native (unboxed) arguments | unboxed vmcall of `add_numbers_native` | passes |
 

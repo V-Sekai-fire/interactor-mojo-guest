@@ -120,6 +120,34 @@ long sandbox_ticks_usec(void) {
     return ret.type == VARIANT_INT ? (long)ret.i : -1;
 }
 
+/* A one-shot Godot Timer whose timeout calls `callback` in the guest. The callback is boxed:
+ * (return Variant*, timer Variant*, capture Variant*). */
+#define ECALL_TIMER_PERIODIC 530
+void sandbox_timer_oneshot(double seconds, void *callback) {
+    struct GuestVariant ret;
+    unsigned char capture[32] = { 0 };
+    register double f0 __asm__("fa0") = seconds;
+    register long a0 __asm__("a0") = 1;
+    register void *a1 __asm__("a1") = callback;
+    register void *a2 __asm__("a2") = capture;
+    register void *a3 __asm__("a3") = &ret;
+    register long a7 __asm__("a7") = ECALL_TIMER_PERIODIC;
+    __asm__ volatile("ecall" : "+r"(a0) : "f"(f0), "r"(a1), "r"(a2), "r"(a3), "r"(a7) : "memory");
+}
+
+extern void sandbox_timer_fired(void);
+static void timer_callback(struct GuestVariant *ret, struct GuestVariant *timer, struct GuestVariant *capture) {
+    (void)timer; (void)capture;
+    ret->type = VARIANT_NIL;
+    sandbox_timer_fired();
+}
+void sandbox_arm_timer_ns(long ns) { sandbox_timer_oneshot((double)ns / 1e9, (void *)timer_callback); }
+
+/* Two numbers the guest leaves for the host to read: when a suspended wait began and ended. */
+static long noted[2] = { -1, -1 };
+void sandbox_note(long i, long v) { noted[i] = v; }
+long sandbox_noted(long i) { return noted[i]; }
+
 int sandbox_variant_set_int(struct GuestVariant *v, long x) { v->type = VARIANT_INT; v->i = x; return 0; }
 int sandbox_variant_get_int(const struct GuestVariant *v, long *x) {
     if (v->type != VARIANT_INT) return -EINVAL_;
@@ -197,7 +225,21 @@ static void add_numbers_native(struct GuestVariant *ret, long a, long b) {
     sandbox_variant_set_int(ret, mojo_add_numbers(a, b));
 }
 
+extern long mojo_suspend_start(long ns) __attribute__((weak));
+extern long mojo_suspend_elapsed(void) __attribute__((weak));
+static void suspend_start(struct GuestVariant *ret, const struct GuestVariant *ns) {
+    long n;
+    if (sandbox_variant_get_int(ns, &n)) { ret->type = VARIANT_NIL; return; }
+    sandbox_variant_set_int(ret, mojo_suspend_start(n));
+}
+static void suspend_elapsed(struct GuestVariant *ret) { sandbox_variant_set_int(ret, mojo_suspend_elapsed()); }
+
 void sandbox_register_api(void) {
+    if (mojo_suspend_start) {
+        sandbox_add_function("suspend_start", 13, (void *)suspend_start, "int", "int ns");
+        sandbox_add_function("suspend_elapsed", 15, (void *)suspend_elapsed, "int", "");
+        return;
+    }
     sandbox_add_function("add_numbers_native", 18, (void *)add_numbers_native, "int", "int a, int b");
     sandbox_add_function("add_numbers", 11, (void *)add_numbers, "int", "int a, int b");
     sandbox_add_function("echo", 4, (void *)echo, "Variant", "Variant value");

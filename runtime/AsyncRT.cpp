@@ -45,7 +45,40 @@ char cpuDevice;
 
 ChainState *&state(void *chain) { return *static_cast<ChainState **>(chain); }
 
+// Chains that wait on a Godot timer, earliest deadline first.
+struct Armed { long deadline_us; ChainState *chain; };
+std::vector<Armed> &armed() {
+  static std::vector<Armed> a;
+  return a;
+}
+
 } // namespace
+
+extern "C" void sandbox_drain(void) { drain(); }
+extern "C" long sandbox_ticks_usec(void);
+extern "C" void sandbox_arm_timer_ns(long ns);
+
+// Arms a one-shot host timer that completes `chain` when it fires. The caller suspends, so the
+// guest returns to the host and nothing runs, or is charged, until the timer's timeout.
+extern "C" void sandbox_wake_chain_after(void *chain, long ns) {
+  armed().push_back({sandbox_ticks_usec() + ns / 1000, *static_cast<ChainState **>(chain)});
+  sandbox_arm_timer_ns(ns);
+}
+
+// The host timer's timeout: the earliest armed chain completes and its waiters run.
+extern "C" void sandbox_timer_fired(void) {
+  std::vector<Armed> &a = armed();
+  if (a.empty()) return;
+  size_t first = 0;
+  for (size_t i = 1; i < a.size(); i++)
+    if (a[i].deadline_us < a[first].deadline_us) first = i;
+  ChainState *s = a[first].chain;
+  a.erase(a.begin() + first);
+  s->ready = true;
+  for (Job &j : s->waiters) queue().push_back(j);
+  s->waiters.clear();
+  drain();
+}
 
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_InitializeChain(void *chain) {
   state(chain) = new ChainState();
