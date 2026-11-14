@@ -46,6 +46,32 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 - No CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - Only single-hart behaviour, and only a double-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for a single-precision one, which I did not run.
 
+## The limits as tests
+
+Each limit below is a test that does not pass yet, so it can go green when the limit is lifted. `pixi run test-limits` runs the witness properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout at `../contract-witness-mojo`, or `WITNESS_REPO`). It exits 1 while any limit is red, so it is not part of `pixi run test`, and CI does not run it. It exits 2 if a control goes red.
+
+| Limit | Test | Result today |
+|---|---|---|
+| INT Variants only (control) | `tests/limits.mojo` int round trip | passes |
+| bool Variants | bool round trip | red |
+| float Variants | float round trip | red |
+| string Variants | string round trip | red |
+| object Variants | object round trip | red |
+| One worker, no parallelism | more than one worker | red |
+| `Wait_Timeout` does not sleep | `Wait_Timeout` waits its deadline | skipped: the clock does not advance in rvlinux or in the Sandbox build |
+| Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, 100 tasks on one lock |
+| Native (unboxed) arguments | `project/limits_host.gd` unboxed vmcall | red |
+| A second `vmcall` after the first (control) | `project/limits_host.gd` repeated vmcall | passes |
+
+The bool, float, string and object glue is declared in `runtime/sandbox_abi.c` and returns `-ENOSYS`, so each of those tests fails for that reason. The two GDScript checks are not witness properties, because a property runs in the guest and cannot choose how the host passes its arguments. Run them with `godot --path project --script limits_host.gd`.
+
+Not written as tests, and why:
+
+- A single-precision host (`SANDBOX_VARIANT_SIZE=24`) needs a single-precision engine build, which I do not have.
+- A `Wait` on a chain nothing can complete aborts the whole guest, so a property cannot catch it.
+- `parallelize` is in `max.algorithm`. Importing it is a build error, not a failing property.
+- CI does not run the Godot test, and rvlinux has no Sandbox host. These are about where tests run, not about the guest.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).

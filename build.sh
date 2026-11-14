@@ -9,10 +9,13 @@ GCCLIB="$SYSROOT/lib/gcc-cross/14"
 [ -d "$SYSROOT" ] || { echo "no sysroot at $SYSROOT; clone repository-riscv64-sysroot or set SYSROOT_REPO" >&2; exit 1; }
 mkdir -p build
 TRIPLE=riscv64-unknown-linux-gnu
-mojo build src/guest.mojo --target-accelerator=none \
+SRC="${1:-src/guest.mojo}"
+NAME="${2:-guest}"
+MOJO_FLAGS="${MOJO_FLAGS:-}"
+mojo build "$SRC" $MOJO_FLAGS --target-accelerator=none \
   --target-triple=$TRIPLE --target-cpu=generic-rv64 \
   --target-features=+m,+a,+f,+d,+c --target-abi=lp64d \
-  --emit object -o build/guest_mojo.o
+  --emit object -o build/${NAME}_mojo.o
 CXXFLAGS="--target=$TRIPLE --sysroot=$SYSROOT -march=rv64gc -mabi=lp64d -O2 -std=c++20 \
   -isystem $SYSROOT/include/c++/14 -isystem $SYSROOT/include/c++/14/riscv64-linux-gnu \
   -Iruntime/shim -Iruntime"
@@ -24,5 +27,5 @@ clang++ $CXXFLAGS -c runtime/upstream/Globals.cpp -o build/Globals.o
 clang --target=$TRIPLE --sysroot="$SYSROOT" -march=rv64gc -mabi=lp64d -O2 \
   -DSANDBOX_VARIANT_SIZE="${SANDBOX_VARIANT_SIZE:-40}" -c runtime/sandbox_abi.c -o build/sandbox_abi.o
 clang++ --target=$TRIPLE --sysroot="$SYSROOT" -fuse-ld=lld -B"$GCCLIB" -L"$GCCLIB" -static \
-  -o build/guest.elf build/guest_mojo.o build/AsyncRT.o build/Memory.o build/System.o build/Globals.o build/sandbox_abi.o
-file build/guest.elf
+  -o build/$NAME.elf build/${NAME}_mojo.o build/AsyncRT.o build/Memory.o build/System.o build/Globals.o build/sandbox_abi.o
+file build/$NAME.elf

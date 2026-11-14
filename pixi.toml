@@ -13,3 +13,4 @@ python = "3.12.*"
 build = "./build.sh"
 test = { cmd = "test/run_godot.sh", depends-on = ["build"] }
 test-rvlinux = { cmd = "test/run_rvlinux.sh", depends-on = ["build"] }
+test-limits = "test/run_limits.sh"

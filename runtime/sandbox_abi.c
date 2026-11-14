@@ -58,13 +58,38 @@ __attribute__((used, retain, noreturn)) void fast_exit(void) {
     __builtin_unreachable();
 }
 
-/* The logic is Mojo; this is only the boxed-Variant calling convention: a0 is the
- * return Variant, a1 and a2 point at the arguments. */
-extern long mojo_add_numbers(long a, long b);
+/* ---- Variant conversions -------------------------------------------------
+ * Each returns 0 on success and -ENOSYS_ for a type the glue does not handle yet.
+ * Only INT is handled. The rest are declared so tests/limits.mojo can call them:
+ * they are the red side of a test-first list, and each one's test passes the day
+ * the stub is replaced. */
+#define ENOSYS_ 38
+enum { VARIANT_NIL = 0, VARIANT_BOOL = 1, VARIANT_FLOAT = 3, VARIANT_STRING = 4, VARIANT_OBJECT = 24 };
+
+int sandbox_variant_set_int(struct GuestVariant *v, long x) { v->type = VARIANT_INT; v->i = x; return 0; }
+int sandbox_variant_get_int(const struct GuestVariant *v, long *x) {
+    if (v->type != VARIANT_INT) return -ENOSYS_;
+    *x = v->i;
+    return 0;
+}
+int sandbox_variant_set_bool(struct GuestVariant *v, int b) { (void)b; v->type = VARIANT_NIL; return -ENOSYS_; }
+int sandbox_variant_get_bool(const struct GuestVariant *v, int *b) { (void)v; (void)b; return -ENOSYS_; }
+int sandbox_variant_set_float(struct GuestVariant *v, double f) { (void)f; v->type = VARIANT_NIL; return -ENOSYS_; }
+int sandbox_variant_get_float(const struct GuestVariant *v, double *f) { (void)v; (void)f; return -ENOSYS_; }
+int sandbox_variant_set_string(struct GuestVariant *v, const char *s, size_t n) { (void)s; (void)n; v->type = VARIANT_NIL; return -ENOSYS_; }
+int sandbox_variant_get_string(const struct GuestVariant *v, char *buf, size_t cap, size_t *n) { (void)v; (void)buf; (void)cap; (void)n; return -ENOSYS_; }
+int sandbox_variant_set_object(struct GuestVariant *v, long handle) { (void)handle; v->type = VARIANT_NIL; return -ENOSYS_; }
+int sandbox_variant_get_object(const struct GuestVariant *v, long *handle) { (void)v; (void)handle; return -ENOSYS_; }
+
+/* The logic is Mojo; this is the boxed-Variant calling convention: a0 is the
+ * return Variant, a1 and a2 point at the arguments. A non-int argument gives a
+ * NIL return. */
+extern long mojo_add_numbers(long a, long b) __attribute__((weak));
 
 static void add_numbers(struct GuestVariant *ret, const struct GuestVariant *a, const struct GuestVariant *b) {
-    ret->type = VARIANT_INT;
-    ret->i = mojo_add_numbers(a->i, b->i);
+    long x, y;
+    if (sandbox_variant_get_int(a, &x) || sandbox_variant_get_int(b, &y)) { ret->type = VARIANT_NIL; return; }
+    sandbox_variant_set_int(ret, mojo_add_numbers(x, y));
 }
 
 void sandbox_register_api(void) {
