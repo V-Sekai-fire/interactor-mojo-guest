@@ -1,14 +1,108 @@
 // Replaces Mojo/lib/CompilerRT/AsyncRT.cpp (modular/modular e6e596ce). The original
-// is a thread-pool runtime built on AsyncRT/Runtime, which is not in the public
-// tree and needs threads a guest does not have. This gives main() the one CPU
-// device its startup code asks for. Chains, tasks and coroutines are not here, so
-// anything that uses the async runtime (parallelize, async fn) fails to link.
+// is a thread pool on AsyncRT/Runtime, which is not in the public tree. This is the
+// same entry points on a pool of one worker: the thread that waits. Execute and
+// AndThen queue the coroutine, and the queue runs, in order, whenever the program
+// waits on a chain or the runtime is released. Complete moves a chain's
+// continuations onto the queue, as the original does with its work queue.
+//
+// A chain is the pointer-sized slot Mojo's _Chain holds, pointing at a ChainState.
 #include "Support/SymbolExport.h"
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <deque>
+#include <utility>
+#include <vector>
 
-namespace { char cpuDevice; }
+namespace {
+
+using Resume = void (*)(int8_t *);
+
+struct Job { Resume resume; int8_t *hdl; };
+
+struct ChainState {
+  bool ready = false;
+  std::vector<Job> waiters;
+};
+
+// The one worker's queue.
+std::deque<Job> &queue() {
+  static std::deque<Job> q;
+  return q;
+}
+
+bool runOne() {
+  if (queue().empty()) return false;
+  Job j = queue().front();
+  queue().pop_front();
+  j.resume(j.hdl);
+  return true;
+}
+
+void drain() { while (runOne()) {} }
+
+char cpuDevice;
+
+ChainState *&state(void *chain) { return *static_cast<ChainState **>(chain); }
+
+} // namespace
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_InitializeChain(void *chain) {
+  state(chain) = new ChainState();
+}
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_DestroyChain(void *chain) {
+  delete state(chain);
+  state(chain) = nullptr;
+}
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_Complete(void *chain) {
+  ChainState *s = state(chain);
+  s->ready = true;
+  for (Job &j : s->waiters) queue().push_back(j);
+  s->waiters.clear();
+}
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_Wait(void *chain) {
+  ChainState *s = state(chain);
+  while (!s->ready) {
+    if (!runOne()) {
+      // Nothing is queued and no other thread exists to complete the chain.
+      std::fputs("AsyncRT: Wait on a chain that nothing can complete\n", stderr);
+      std::abort();
+    }
+  }
+}
+
+// The deadline is not waited for: with one worker, only queued work can complete a
+// chain, so after the queue is empty the answer cannot change.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT bool KGEN_CompilerRT_AsyncRT_Wait_Timeout(void *chain, int64_t ns) {
+  (void)ns;
+  ChainState *s = state(chain);
+  while (!s->ready && runOne()) {}
+  return s->ready;
+}
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void
+KGEN_CompilerRT_AsyncRT_Execute(Resume resume, int8_t *hdl, ssize_t desiredWorkerId) {
+  (void)desiredWorkerId; // there is only worker 0
+  queue().push_back({resume, hdl});
+}
+
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void
+KGEN_CompilerRT_AsyncRT_AndThen(Resume resume, void *chain, int8_t *hdl) {
+  ChainState *s = state(chain);
+  if (s->ready) queue().push_back({resume, hdl});
+  else s->waiters.push_back({resume, hdl});
+}
 
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void *KGEN_CompilerRT_AsyncRT_GetCurrentCPUDevice() { return nullptr; }
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void *KGEN_CompilerRT_AsyncRT_GetOrCreateCPUDevice() { return &cpuDevice; }
-COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_ReleaseCPUDevice(void *) {}
+// The device is released as the program ends, so tasks nobody waited for run now.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_ReleaseCPUDevice(void *) { drain(); }
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT uint32_t KGEN_CompilerRT_AsyncRT_ParallelismLevel() { return 1; }
+
+// A spin waiter on one worker lets the queue make progress instead of spinning.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void *KGEN_CompilerRT_AsyncRT_InitializeSpinWaiter() { return new char; }
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_SpinWaiter_Wait(void *) { runOne(); }
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_DestroySpinWaiter(void *w) { delete static_cast<char *>(w); }
