@@ -1,4 +1,5 @@
 from std.runtime._asyncrt import create_task
+from std.ffi import external_call
 from std.sys import exit
 
 
@@ -20,6 +21,11 @@ __async def add_two_of_them(a: Int, b: Int) -> Int:
     return __await create_task(add[1](a)) + __await create_task(add[2](b))
 
 
+@export
+def mojo_add_numbers(a: Int, b: Int) abi("C") -> Int:
+    return a + b
+
+
 def main():
     print("hello from Mojo in a RISC-V guest")
     # fib(30) = 832040; exit code 0 means the arithmetic came out right.
@@ -36,3 +42,5 @@ def main():
     else:
         print("RESULT: tasks sum wrong", sum)
         exit(1)
+    # Offer add_numbers to the host. It is callable after main returns.
+    external_call["sandbox_register_api", NoneType]()

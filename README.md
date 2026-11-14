@@ -1,13 +1,17 @@
 # interactor-mojo-guest
 
-A Mojo program, with its standard library, built into a static RISC-V 64 guest ELF that runs in a godot-sandbox module build. It prints a line with `print`, computes `fib(30)`, adds up three async tasks, and exits with 0 when both results are right.
+A Mojo program, with its standard library, built into a static RISC-V 64 guest ELF that runs in a godot-sandbox module build. It prints a line with `print`, computes `fib(30)`, adds up three async tasks, and offers `add_numbers` to the host, which can `vmcall` it after `main` returns.
 
 Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link step), so `build.sh` does it in steps:
 
 1. `mojo build --emit object` makes an RV64GC object (`lp64d`) from `src/guest.mojo`.
 2. `runtime/` is a fork of the parts of Modular's runtime that Mojo's startup code calls (`KGEN_CompilerRT_*`), built for riscv64 (see below).
-3. `runtime/sandbox_abi.c` adds the `.sandbox_variant` section, the guest's half of the host contract. It holds the size of a Variant, 40 bytes for a double-precision host, and a host with a different size refuses the program.
+3. `runtime/sandbox_abi.c` is the guest's half of the host contract: the `.sandbox_variant` section (the size of a Variant, 40 bytes for a double-precision host, and a host with a different size refuses the program), `fast_exit` (where a finished `vmcall` returns to), and `sandbox_register_api`, which registers `add_numbers` through `ecall` 547 while `main` runs. The function's logic is Mojo (`mojo_add_numbers`, exported with `abi("C")`). The C part only unpacks the boxed Variants.
 4. `clang++` and `lld` link everything statically against the glibc sysroot in `V-Sekai-fire/repository-riscv64-sysroot`.
+
+## Public API
+
+`sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int`. The host must set `unboxed_arguments = false`, because the C glue reads Variant pointers, not native registers. Registration is only legal during the host's initialization, which is when `main` runs.
 
 ## Build and run
 
@@ -16,9 +20,9 @@ Clone the sysroot repository beside this one (or set `SYSROOT_REPO`), then:
     pixi run build
     GODOT=<engine binary> pixi run test
 
-`GODOT` is a double-precision editor build with the Sandbox module, for example the `godot.macos.editor.double.arm64` asset of a `V-Sekai-fire/entities-zone` release. The test opens a real window, never `--headless`, loads the ELF into a `Sandbox`, and judges by the guest's own `RESULT: fib(30) == 832040` and `RESULT: tasks sum == 33` lines and the absence of a Sandbox error. A build without the Sandbox class fails the test.
+`GODOT` is a double-precision editor build with the Sandbox module, for example the `godot.macos.editor.double.arm64` asset of a `V-Sekai-fire/entities-zone` release. The test opens a real window, never `--headless`, loads the ELF into a `Sandbox`, and judges by the guest's own `RESULT: fib(30) == 832040` and `RESULT: tasks sum == 33` lines and by `vmcall("add_numbers", 3, 4)` returning 7 and the absence of a Sandbox error. A build without the Sandbox class fails the test.
 
-For a run with no engine and no window, build `rvlinux` from [libriscv/libriscv-rs](https://github.com/libriscv/libriscv-rs) (safe Rust, BSD-3-Clause, pinned nightly) and run `RVLINUX=<binary> pixi run test-rvlinux`. It runs the same ELF as a Linux userspace guest in under a millisecond and judges by the same `RESULT` lines and the guest's exit code. It does not provide the Sandbox host API, so it cannot check the `.sandbox_variant` contract.
+For a run with no engine and no window, build `rvlinux` from [libriscv/libriscv-rs](https://github.com/libriscv/libriscv-rs) (safe Rust, BSD-3-Clause, pinned nightly) and run `RVLINUX=<binary> pixi run test-rvlinux`. It runs the same ELF as a Linux userspace guest in under a millisecond and judges by the same `RESULT` lines and the guest's exit code. It does not provide the Sandbox host API, so it reports `Unhandled system call: 547` for the registration and cannot check the `.sandbox_variant` contract or the `vmcall`.
 
 ## The runtime fork
 
@@ -38,7 +42,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 ## What this does not have
 
 - One worker, so tasks interleave but never run in parallel. The test exercises `create_task` and `__await` from `std.runtime._asyncrt` (the stdlib marks async unfinished). `parallelize` is in `max.algorithm`, and I did not try it.
-- No `vmcall` surface. `main` runs and exits, so a host cannot call into the guest afterwards. It registers no public API functions or `.sigs`.
+- One public function, `add_numbers`, taking and returning ints. Other Variant types, strings and objects are not handled. It has not been called from a second `vmcall` after a reset, or with native (unboxed) arguments.
 - No CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - Only single-hart behaviour, and only a double-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for a single-precision one, which I did not run.
 

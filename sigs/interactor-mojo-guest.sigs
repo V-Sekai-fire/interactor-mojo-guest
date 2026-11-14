@@ -1,0 +1,4 @@
+# The public surface of build/guest.elf: what a host can vmcall. One line per
+# function, <Namespace>.<method>(<args>) -> <return>. Keep this and
+# sandbox_register_api() in runtime/sandbox_abi.c in step.
+MojoGuest.add_numbers(int a, int b) -> int

@@ -10,4 +10,5 @@ cp build/guest.elf project/guest.elf
 out=$("$GODOT" --path project --script run.gd --quit-after 300 2>&1) || true
 printf '%s\n' "$out" | grep -E "RESULT|ERROR: Sandbox|hello from" || true
 printf '%s\n' "$out" | grep -q "RESULT: fib(30) == 832040" &&
-  printf '%s\n' "$out" | grep -q "RESULT: tasks sum == 33" && ! printf '%s\n' "$out" | grep -q "ERROR: Sandbox"
+  printf '%s\n' "$out" | grep -q "RESULT: tasks sum == 33" &&
+  printf '%s\n' "$out" | grep -q "RESULT: vmcall add_numbers(3, 4) == 7" && ! printf '%s\n' "$out" | grep -q "ERROR: Sandbox"
