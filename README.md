@@ -2,7 +2,7 @@
 
 A Mojo program, with its standard library, built into a static RISC-V 64 guest ELF that runs in a godot-sandbox module build. It prints a line with `print`, computes `fib(30)`, adds up three async tasks, and offers `add_numbers` to the host, which can `vmcall` it after `main` returns.
 
-Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link step), so `build.sh` does it in steps:
+Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link step), so `tools/build.exs` does it in steps:
 
 1. `mojo build --emit object` makes an RV64GC object (`lp64d`) from `src/guest.mojo`.
 2. `runtime/` is a fork of the parts of Modular's runtime that Mojo's startup code calls (`KGEN_CompilerRT_*`), built for riscv64 (see below).
@@ -14,6 +14,8 @@ Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link ste
 `sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int`. The host must set `unboxed_arguments = false`, because the C glue reads Variant pointers, not native registers. Registration is only legal during the host's initialization, which is when `main` runs.
 
 ## Build and run
+
+Tools are Elixir scripts in `tools/` and gates are GDScript in `project/`, as the workspace's rules for guests say. `pixi run build`, `test`, `test-rvlinux` and `test-limits` call them.
 
 In a workspace checkout the sysroot is found at `../../5-repository/riscv64-sysroot`. Standalone, clone the sysroot repository beside this one (or set `SYSROOT_REPO`). Then:
 

@@ -7,10 +7,10 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 mojo-compiler = "==1.3.0.dev2026111316"
 clangxx = ">=18"
 lld = ">=18"
-python = "3.12.*"
+elixir = "*"
 
 [tasks]
-build = "./build.sh"
-test = { cmd = "test/run_godot.sh", depends-on = ["build"] }
-test-rvlinux = { cmd = "test/run_rvlinux.sh", depends-on = ["build"] }
-test-limits = "test/run_limits.sh"
+build = "elixir tools/build.exs"
+test = "elixir tools/test.exs godot"
+test-rvlinux = "elixir tools/test.exs rvlinux"
+test-limits = "elixir tools/test.exs limits"
