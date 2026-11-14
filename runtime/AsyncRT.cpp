@@ -74,13 +74,19 @@ COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void KGEN_CompilerRT_AsyncRT_Wait
   }
 }
 
-// The deadline is not waited for: with one worker, only queued work can complete a
-// chain, so after the queue is empty the answer cannot change.
+// With one worker only queued work can complete a chain, so the queue is drained first. If the
+// chain is still not ready, the deadline is waited out on Godot's clock. A host with no clock
+// answers at once.
+extern "C" long sandbox_ticks_usec(void);
+
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT bool KGEN_CompilerRT_AsyncRT_Wait_Timeout(void *chain, int64_t ns) {
-  (void)ns;
   ChainState *s = state(chain);
   while (!s->ready && runOne()) {}
-  return s->ready;
+  if (s->ready) return true;
+  long start = sandbox_ticks_usec();
+  if (start < 0) return false;
+  while (sandbox_ticks_usec() - start < ns / 1000) {}
+  return false;
 }
 
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void

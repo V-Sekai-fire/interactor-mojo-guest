@@ -56,7 +56,16 @@ defmodule Test do
         cmd(godot, ["--path", "project", "--script", "limits_host.gd", "--quit-after", "300"])
 
       show(out, ~r/^(PASS|FAIL|RESULT: \d)/)
-      judge(out, ["RESULT: 0 falsified"])
+
+      with :ok <- judge(out, ["RESULT: 0 falsified"]),
+           :ok <- build(["tests/limits.mojo", "limits"], MOJO_FLAGS: "-I #{witness()}/src -I src"),
+           {:ok, _} <- File.copy("build/limits.elf", "project/limits.elf") do
+        {props, _} =
+          cmd(godot, ["--path", "project", "--script", "limits_run.gd", "--quit-after", "300"])
+
+        show(props, ~r/^(PASS|FAIL|SKIP|RESULT: \d)/)
+        judge(props, ["PASS Wait_Timeout waits its deadline", "RESULT: 0 falsified"])
+      end
     end
   end
 

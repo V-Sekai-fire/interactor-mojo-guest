@@ -139,24 +139,20 @@ def spin_lock_under_tasks(x: Int, mut r: Run) -> Bool:
     return raw == n and Int(counter.load()) == n
 
 
-def clock_advances() -> Bool:
-    # rvlinux reports a clock that never moves; a timing property is meaningless there.
-    var start = perf_counter_ns()
-    var sink = 0
-    for i in range(5_000_000):
-        sink += i
-    return perf_counter_ns() > start and sink > 0
+def ticks_usec() -> Int:
+    # Godot's clock through the host; -1 when there is no host to ask.
+    return Int(external_call["sandbox_ticks_usec", Int64]())
 
 
 def timeout_waits_its_deadline(x: Int, mut r: Run) -> Bool:
-    # A chain nothing completes, waited on for 2 ms: a real wait takes at least 2 ms.
+    # A chain nothing completes, waited on for 2 ms: a real wait takes at least 2 ms of Godot time.
     var chain = _Chain()
     _init_asyncrt_chain(Pointer(to=chain))
-    var start = perf_counter_ns()
+    var start = ticks_usec()
     var done = _async_wait_timeout(Pointer(to=chain), 2_000_000)
-    var elapsed = perf_counter_ns() - start
+    var elapsed = ticks_usec() - start
     _del_asyncrt_chain(Pointer(to=chain))
-    return (not done) and elapsed >= 2_000_000
+    return (not done) and elapsed >= 2_000
 
 
 # ---- Runner ---------------------------------------------------------------------------
@@ -193,10 +189,10 @@ def main():
     failed += run[Int]("one worker (n = 1)", gen_int, one_worker, shrink_int, show_int)
     failed += run[Int]("parallelize visits each item once", gen_int, parallelize_visits_each_item_once, shrink_int, show_int)
     failed += run[Int]("spin lock under tasks (control)", gen_int, spin_lock_under_tasks, shrink_int, show_int)
-    if clock_advances():
+    if ticks_usec() >= 0:
         checked += 1
         failed += run[Int]("Wait_Timeout waits its deadline", gen_int, timeout_waits_its_deadline, shrink_int, show_int)
     else:
-        print("SKIP Wait_Timeout waits its deadline :: the clock does not advance on this host")
+        print("SKIP Wait_Timeout waits its deadline :: this host has no Godot clock")
     print("RESULT:", failed, "falsified of", checked)
     exit(1 if failed > 0 else 0)

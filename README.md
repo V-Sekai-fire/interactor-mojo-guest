@@ -45,13 +45,13 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 
 - One worker by decision (n = 1), so tasks interleave but never run in parallel. `max.algorithm`'s `parallelize` does not build for a guest, because its multi-item branch enqueues onto a DeviceContext from the MAX driver. `src/guest_algorithm.mojo` is its one-worker path, which runs every item in order on the calling thread.
 - One ABI per sandbox. `add_numbers` and `echo` take boxed Variant pointers, so the host sets `unboxed_arguments = false`. `add_numbers_native` is the same function for a host with it set to true. Only that one function has a native form.
-- A `Wait_Timeout` that sleeps. With one worker it answers once the queue is empty.
+- A `Wait_Timeout` that sleeps. It drains the queue, then polls Godot's `Time.get_ticks_usec` until the deadline, and every poll is charged to the instruction budget. The engine test sets `execution_timeout` to 0 (no limit) for that reason. Without a Sandbox host, as in rvlinux, it answers at once.
 - A CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
 - A single-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for one; I did not run it. The double host refuses that build, which I did run.
 
 ## The limits as tests
 
-`pixi run test-limits` runs contract-witness-mojo properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout, `../../2-contract/witness-mojo` in a workspace or `WITNESS_REPO`). `pixi run test-hostlimits` runs GDScript checks in the Sandbox build. A test that fails is a limit that still stands.
+`pixi run test-limits` runs contract-witness-mojo properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout, `../../2-contract/witness-mojo` in a workspace or `WITNESS_REPO`). `pixi run test-hostlimits` runs GDScript checks in the Sandbox build, and the same witness properties inside it. A test that fails is a limit that still stands.
 
 | Limit | Test | Result today |
 |---|---|---|
@@ -63,7 +63,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 | `parallelize` on one worker | visits each item once | passes |
 | Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, up to 50 tasks on one lock |
 | A second `vmcall` after the first (control) | repeated vmcall | passes |
-| `Wait_Timeout` does not sleep | waits its deadline | skipped: the clock does not advance in rvlinux or in the Sandbox build |
+| `Wait_Timeout` waits its deadline on Godot's clock | waits its deadline | passes in the Sandbox build, skipped in rvlinux, which has no host clock |
 | Native (unboxed) arguments | unboxed vmcall of `add_numbers_native` | passes |
 
 The Variant glue is in `runtime/sandbox_abi.c`. Bool, float and object travel in the payload. A string is created and fetched through the host's `ECALL_VCREATE` and `ECALL_VFETCH`. The string test needs `references_max` raised in the host, because each trial scopes one host variant and the default allows 100. `project/limits_run.gd` sets 20,000.

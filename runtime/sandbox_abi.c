@@ -92,6 +92,34 @@ int sandbox_host_present(void) {
     return r == 0 || r == 1;
 }
 
+/* Godot's clock: the Time singleton's get_ticks_usec, through GET_OBJ and OBJ_CALLP.
+ * Returns -1 when the host does not answer, as under rvlinux. */
+#define ECALL_GET_OBJ 504
+#define ECALL_OBJ_CALLP 506
+static long ecall7(long n, long a0v, long a1v, long a2v, long a3v, long a4v, long a5v, long a6v) {
+    register long a0 __asm__("a0") = a0v;
+    register long a1 __asm__("a1") = a1v;
+    register long a2 __asm__("a2") = a2v;
+    register long a3 __asm__("a3") = a3v;
+    register long a4 __asm__("a4") = a4v;
+    register long a5 __asm__("a5") = a5v;
+    register long a6 __asm__("a6") = a6v;
+    register long a7 __asm__("a7") = n;
+    __asm__ volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7) : "memory");
+    return a0;
+}
+
+long sandbox_ticks_usec(void) {
+    static long time_obj = 0;
+    struct GuestVariant ret;
+    if (!sandbox_host_present()) return -1;
+    if (time_obj == 0) time_obj = ecall4(ECALL_GET_OBJ, (long)"Time", 4, 0, 0);
+    if (time_obj == 0) return -1;
+    ret.type = VARIANT_NIL;
+    ecall7(ECALL_OBJ_CALLP, time_obj, (long)"get_ticks_usec", 14, 0, (long)&ret, 0, 0);
+    return ret.type == VARIANT_INT ? (long)ret.i : -1;
+}
+
 int sandbox_variant_set_int(struct GuestVariant *v, long x) { v->type = VARIANT_INT; v->i = x; return 0; }
 int sandbox_variant_get_int(const struct GuestVariant *v, long *x) {
     if (v->type != VARIANT_INT) return -EINVAL_;
