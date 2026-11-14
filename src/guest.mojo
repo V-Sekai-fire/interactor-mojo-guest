@@ -1,4 +1,4 @@
-from std.ffi import external_call
+from std.sys import exit
 
 
 def fib(n: Int) -> Int:
@@ -11,16 +11,11 @@ def fib(n: Int) -> Int:
     return a
 
 
-def write_line(text: StringSpan):
-    _ = external_call["write", Int](1, text.unsafe_ptr(), text.byte_length())
-
-
-@export
-def mojo_guest_main() abi("C") -> Int32:
-    write_line("hello from Mojo in a RISC-V guest\n")
+def main():
+    print("hello from Mojo in a RISC-V guest")
     # fib(30) = 832040; exit code 0 means the arithmetic came out right.
     if fib(30) == 832040:
-        write_line("RESULT: fib(30) == 832040\n")
-        return 0
-    write_line("RESULT: fib(30) wrong\n")
-    return 1
+        print("RESULT: fib(30) == 832040")
+    else:
+        print("RESULT: fib(30) wrong")
+        exit(1)

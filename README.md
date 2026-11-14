@@ -1,19 +1,33 @@
 # interactor-mojo-guest
 
-A Mojo program built into a static RISC-V 64 guest ELF. It prints a line, computes `fib(30)`, and exits with 0 when the result is right.
+A Mojo program, with its standard library, built into a static RISC-V 64 guest ELF that runs in a godot-sandbox module build. It prints a line with `print`, computes `fib(30)`, and exits with 0 when the result is right.
 
-Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link step), so the build has three steps:
+Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link step), so `build.sh` does it in steps:
 
 1. `mojo build --emit object` makes an RV64GC object (`lp64d`) from `src/guest.mojo`.
-2. `clang` builds `crt/start.c`, a freestanding entry with `_start`, `write` and `exit` as Linux syscalls (`ecall` 64 and 93).
-3. `ld.lld -static -nostdlib` links both into `build/guest.elf`. The ELF is `ET_EXEC` with a low entry point, the layout a godot-sandbox guest needs.
+2. `runtime/` is a fork of the parts of Modular's runtime that Mojo's startup code calls (`KGEN_CompilerRT_*`), built for riscv64 (see below).
+3. `runtime/sandbox_abi.c` adds the `.sandbox_variant` section, the guest's half of the host contract. It holds the size of a Variant, 40 bytes for a double-precision host, and a host with a different size refuses the program.
+4. `clang++` and `lld` link everything statically against the glibc sysroot in `V-Sekai-fire/repository-riscv64-sysroot`.
 
 ## Build and run
 
-    pixi run build
-    pixi run test
+Clone the sysroot repository beside this one (or set `SYSROOT_REPO`), then:
 
-`test/run_guest.py` loads the ELF into Unicorn, serves the two syscalls, and exits with the guest's exit code. Judge a run by the guest's `RESULT:` line, not by the runner alone. It was checked against a deliberately wrong answer, which exits 1.
+    pixi run build
+    GODOT=<engine binary> pixi run test
+
+`GODOT` is a double-precision editor build with the Sandbox module, for example the `godot.macos.editor.double.arm64` asset of a `V-Sekai-fire/entities-zone` release. The test opens a real window, never `--headless`, loads the ELF into a `Sandbox`, and judges by the guest's own `RESULT: fib(30) == 832040` line and the absence of a Sandbox error. A build without the Sandbox class fails the test.
+
+## The runtime fork
+
+`runtime/upstream/` holds `Globals.cpp`, `Memory.cpp`, `Memory.h` and `System.cpp` verbatim from `Mojo/lib/CompilerRT` in modular/modular at `e6e596ce` (Apache-2.0 with LLVM exceptions). That tree does not build on its own, because it includes headers that are not published (`Support/ADT/GlobalTable.h`, `Support/SymbolExport.h`, `AsyncRT/...`). What changed:
+
+- `Globals.cpp` is used as it is, on top of small stand-ins in `runtime/shim/` for `GlobalTable`, `SymbolExport.h` and `llvm::StringRef`.
+- `runtime/Memory.cpp` replaces tcmalloc and logging with `aligned_alloc` and `free`.
+- `runtime/System.cpp` keeps `fprintf`, `GetArgV` and `SetArgV`. It reports one core, and drops the config lookup and the stack-trace handler.
+- `runtime/AsyncRT.cpp` replaces the thread-pool runtime with the one dummy CPU device that `main()` asks for.
+
+Diff `runtime/*.cpp` against `runtime/upstream/` to see each change.
 
 ## Versions
 
@@ -21,9 +35,10 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 
 ## What this does not have
 
-- No Mojo standard library at run time. There is no libc, so `print`, allocation and file I/O are not available. The guest calls `write` through `external_call` and the stub provides it. Only `memcpy` and `memset` are supplied, so code that makes the compiler call other libc symbols fails at link time.
-- No godot-sandbox host test. It has not been loaded by Godot's `Sandbox` class, and it registers no public API functions or `.sigs`. Its entry layout matches what the libriscv loader expects, but the run above is in Unicorn.
-- No `vmcall` surface: `main` exits instead of suspending, so a host cannot call into it afterwards.
+- No async runtime. `parallelize`, tasks and coroutines fail to link, because their `KGEN_CompilerRT_AsyncRT_*` entry points are not provided.
+- No `vmcall` surface. `main` runs and exits, so a host cannot call into the guest afterwards. It registers no public API functions or `.sigs`.
+- No CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
+- Only single-hart behaviour, and only a double-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for a single-precision one, which I did not run.
 
 ## Licence
 

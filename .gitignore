@@ -1,2 +1,5 @@
 build/
 .pixi/
+project/guest.elf
+project/.godot/
+project/*.uid
