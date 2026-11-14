@@ -2,3 +2,4 @@
 # function, <Namespace>.<method>(<args>) -> <return>. Keep this and
 # sandbox_register_api() in runtime/sandbox_abi.c in step.
 MojoGuest.add_numbers(int a, int b) -> int
+MojoGuest.echo(Variant value) -> Variant

@@ -11,6 +11,8 @@ from std.utils.lock import BlockingScopedLock, BlockingSpinLock
 from witness.check import prop_check_shrink
 from witness.ladder import *
 
+from guest_algorithm import parallelize
+
 comptime VARIANT_BYTES = 40  # a Variant of a double-precision host
 
 
@@ -92,10 +94,25 @@ def object_roundtrip(x: Int, mut r: Run) -> Bool:
     return out == x
 
 
-# ---- The one-worker async runtime ----------------------------------------------------
+# ---- The one-worker async runtime (n = 1 by decision) ----------------------------------------------------
 
-def more_than_one_worker(x: Int, mut r: Run) -> Bool:
-    return external_call["KGEN_CompilerRT_AsyncRT_ParallelismLevel", Int32]() > 1
+def one_worker(x: Int, mut r: Run) -> Bool:
+    # The decision is n = 1: one worker, so tasks interleave and never run in parallel.
+    return external_call["KGEN_CompilerRT_AsyncRT_ParallelismLevel", Int32]() == 1
+
+
+def parallelize_visits_each_item_once(x: Int, mut r: Run) -> Bool:
+    var n = (x if x >= 0 else -x) % 50
+    var counts = List[Int](length=n, fill=0)
+
+    def work(i: Int) {mut counts}:
+        counts[i] += 1
+
+    parallelize(work, n)
+    for i in range(n):
+        if counts[i] != 1:
+            return False
+    return True
 
 
 def spin_lock_under_tasks(x: Int, mut r: Run) -> Bool:
@@ -166,11 +183,16 @@ def main():
     failed += run[Int]("int round trip (control)", gen_int, int_roundtrip, shrink_int, show_int)
     failed += run[Bool]("bool round trip", gen_bool, bool_roundtrip, shrink_bool, show_bool)
     failed += run[Float64]("float round trip", gen_float64, float_roundtrip, shrink_float64, show_float)
-    failed += run[String]("string round trip", gen_string, string_roundtrip, shrink_string, show_string)
+    var checked = 8
+    if external_call["sandbox_host_present", Int32]() != 0:
+        failed += run[String]("string round trip", gen_string, string_roundtrip, shrink_string, show_string)
+    else:
+        checked -= 1
+        print("SKIP string round trip :: strings live in the host, and this host has no Sandbox")
     failed += run[Int]("object round trip", gen_int, object_roundtrip, shrink_int, show_int)
-    failed += run[Int]("more than one worker", gen_int, more_than_one_worker, shrink_int, show_int)
+    failed += run[Int]("one worker (n = 1)", gen_int, one_worker, shrink_int, show_int)
+    failed += run[Int]("parallelize visits each item once", gen_int, parallelize_visits_each_item_once, shrink_int, show_int)
     failed += run[Int]("spin lock under tasks (control)", gen_int, spin_lock_under_tasks, shrink_int, show_int)
-    var checked = 7
     if clock_advances():
         checked += 1
         failed += run[Int]("Wait_Timeout waits its deadline", gen_int, timeout_waits_its_deadline, shrink_int, show_int)

@@ -19,12 +19,16 @@ const struct SandboxVariantSize sandbox_variant_size = { { 'S', 'B', 'X', 'V' },
 #define ECALL_SANDBOX_ADD 547
 #define VARIANT_INT 2
 
-/* The guest's Variant: a 32-bit type, then the value at offset 8. Only INT is
- * read or written here, so the rest of the 24 or 40 bytes is never touched. */
+/* The guest's Variant: a 32-bit type, then the payload at offset 8. The scalar types fit
+ * there. A string is an index into the host's scoped variants. The rest of the 24 or 40
+ * bytes is never touched. */
 struct GuestVariant {
     int32_t type;
     int32_t pad;
-    int64_t i;
+    union {
+        int64_t i;
+        double f;
+    };
 };
 
 struct GuestFunctionExtra {
@@ -59,27 +63,80 @@ __attribute__((used, retain, noreturn)) void fast_exit(void) {
 }
 
 /* ---- Variant conversions -------------------------------------------------
- * Each returns 0 on success and -ENOSYS_ for a type the glue does not handle yet.
- * Only INT is handled. The rest are declared so tests/limits.mojo can call them:
- * they are the red side of a test-first list, and each one's test passes the day
- * the stub is replaced. */
+ * Each returns 0 on success, -EINVAL_ for a Variant of another type, -ENOSYS_ when the
+ * host does not answer (no Sandbox host, as under rvlinux), and -ERANGE_ for a string
+ * longer than the caller's buffer. */
+#define EINVAL_ 22
+#define ERANGE_ 34
 #define ENOSYS_ 38
+#define ECALL_IS_EDITOR 512
+#define ECALL_VCREATE 517
+#define ECALL_VFETCH 519
+#define ECALL_ARENA_FREE 483
 enum { VARIANT_NIL = 0, VARIANT_BOOL = 1, VARIANT_FLOAT = 3, VARIANT_STRING = 4, VARIANT_OBJECT = 24 };
+
+static long ecall4(long n, long a0v, long a1v, long a2v, long a3v) {
+    register long a0 __asm__("a0") = a0v;
+    register long a1 __asm__("a1") = a1v;
+    register long a2 __asm__("a2") = a2v;
+    register long a3 __asm__("a3") = a3v;
+    register long a7 __asm__("a7") = n;
+    __asm__ volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a7) : "memory");
+    return a0;
+}
+
+/* The host answers ECALL_IS_EDITOR with 0 or 1. Anything else, including the -1 an
+ * unhandled call leaves in a0, is no Sandbox host. */
+int sandbox_host_present(void) {
+    long r = ecall4(ECALL_IS_EDITOR, -1, 0, 0, 0);
+    return r == 0 || r == 1;
+}
 
 int sandbox_variant_set_int(struct GuestVariant *v, long x) { v->type = VARIANT_INT; v->i = x; return 0; }
 int sandbox_variant_get_int(const struct GuestVariant *v, long *x) {
-    if (v->type != VARIANT_INT) return -ENOSYS_;
+    if (v->type != VARIANT_INT) return -EINVAL_;
     *x = v->i;
     return 0;
 }
-int sandbox_variant_set_bool(struct GuestVariant *v, int b) { (void)b; v->type = VARIANT_NIL; return -ENOSYS_; }
-int sandbox_variant_get_bool(const struct GuestVariant *v, int *b) { (void)v; (void)b; return -ENOSYS_; }
-int sandbox_variant_set_float(struct GuestVariant *v, double f) { (void)f; v->type = VARIANT_NIL; return -ENOSYS_; }
-int sandbox_variant_get_float(const struct GuestVariant *v, double *f) { (void)v; (void)f; return -ENOSYS_; }
-int sandbox_variant_set_string(struct GuestVariant *v, const char *s, size_t n) { (void)s; (void)n; v->type = VARIANT_NIL; return -ENOSYS_; }
-int sandbox_variant_get_string(const struct GuestVariant *v, char *buf, size_t cap, size_t *n) { (void)v; (void)buf; (void)cap; (void)n; return -ENOSYS_; }
-int sandbox_variant_set_object(struct GuestVariant *v, long handle) { (void)handle; v->type = VARIANT_NIL; return -ENOSYS_; }
-int sandbox_variant_get_object(const struct GuestVariant *v, long *handle) { (void)v; (void)handle; return -ENOSYS_; }
+int sandbox_variant_set_bool(struct GuestVariant *v, int b) { v->type = VARIANT_BOOL; v->i = b != 0; return 0; }
+int sandbox_variant_get_bool(const struct GuestVariant *v, int *b) {
+    if (v->type != VARIANT_BOOL) return -EINVAL_;
+    *b = (v->i & 0xff) != 0;
+    return 0;
+}
+int sandbox_variant_set_float(struct GuestVariant *v, double f) { v->type = VARIANT_FLOAT; v->f = f; return 0; }
+int sandbox_variant_get_float(const struct GuestVariant *v, double *f) {
+    if (v->type != VARIANT_FLOAT) return -EINVAL_;
+    *f = v->f;
+    return 0;
+}
+int sandbox_variant_set_object(struct GuestVariant *v, long handle) { v->type = VARIANT_OBJECT; v->i = handle; return 0; }
+int sandbox_variant_get_object(const struct GuestVariant *v, long *handle) {
+    if (v->type != VARIANT_OBJECT) return -EINVAL_;
+    *handle = v->i;
+    return 0;
+}
+
+/* VCREATE method 1 takes a pointer and a length and makes a scoped String on the host. */
+int sandbox_variant_set_string(struct GuestVariant *v, const char *s, size_t n) {
+    struct { const char *data; size_t size; } in = { s, n };
+    v->type = VARIANT_NIL;
+    ecall4(ECALL_VCREATE, (long)v, VARIANT_STRING, 1, (long)&in);
+    return v->type == VARIANT_STRING ? 0 : -ENOSYS_;
+}
+
+/* VFETCH method 1 copies the string into the host's arena; it is copied out and freed. */
+int sandbox_variant_get_string(const struct GuestVariant *v, char *buf, size_t cap, size_t *n) {
+    struct { char *data; size_t size; } out = { 0, 0 };
+    if (v->type != VARIANT_STRING) return -EINVAL_;
+    ecall4(ECALL_VFETCH, (long)(unsigned)v->i, (long)&out, 1, 0);
+    if (out.data == 0 && out.size == 0) return -ENOSYS_;
+    int rc = out.size > cap ? -ERANGE_ : 0;
+    if (rc == 0) for (size_t i = 0; i < out.size; i++) buf[i] = out.data[i];
+    *n = out.size;
+    if (out.data) ecall4(ECALL_ARENA_FREE, (long)out.data, 0, 0, 0);
+    return rc;
+}
 
 /* The logic is Mojo; this is the boxed-Variant calling convention: a0 is the
  * return Variant, a1 and a2 point at the arguments. A non-int argument gives a
@@ -92,6 +149,20 @@ static void add_numbers(struct GuestVariant *ret, const struct GuestVariant *a, 
     sandbox_variant_set_int(ret, mojo_add_numbers(x, y));
 }
 
+/* echo returns its argument by going through every conversion above, so a host
+ * round trip exercises the same code as the tests. A string longer than the buffer,
+ * or a type not handled, gives NIL. */
+static void echo(struct GuestVariant *ret, const struct GuestVariant *a) {
+    long l; int b; double f; size_t n; char buf[4096];
+    ret->type = VARIANT_NIL;
+    if (!sandbox_variant_get_int(a, &l)) sandbox_variant_set_int(ret, l);
+    else if (!sandbox_variant_get_bool(a, &b)) sandbox_variant_set_bool(ret, b);
+    else if (!sandbox_variant_get_float(a, &f)) sandbox_variant_set_float(ret, f);
+    else if (!sandbox_variant_get_object(a, &l)) sandbox_variant_set_object(ret, l);
+    else if (!sandbox_variant_get_string(a, buf, sizeof buf, &n)) sandbox_variant_set_string(ret, buf, n);
+}
+
 void sandbox_register_api(void) {
     sandbox_add_function("add_numbers", 11, (void *)add_numbers, "int", "int a, int b");
+    sandbox_add_function("echo", 4, (void *)echo, "Variant", "Variant value");
 }

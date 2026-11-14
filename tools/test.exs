@@ -3,7 +3,8 @@
 # Runs the built guest and judges it by its own RESULT lines.
 #   elixir tools/test.exs godot     GODOT=<engine binary>, a real window, never --headless
 #   elixir tools/test.exs rvlinux   RVLINUX=<libriscv-rs rvlinux binary>
-#   elixir tools/test.exs limits    RVLINUX, and a witness checkout; red on purpose
+#   elixir tools/test.exs limits    RVLINUX, and a witness checkout
+#   elixir tools/test.exs hostlimits  GODOT; red while a host limit stands
 defmodule Test do
   def main(argv) do
     File.cd!(Path.expand("..", __DIR__))
@@ -45,11 +46,25 @@ defmodule Test do
     end
   end
 
+  defp run(["hostlimits"]) do
+    with {:ok, godot} <- env("GODOT"),
+         :ok <- build(),
+         {:ok, _} <- File.copy("build/guest.elf", "project/guest.elf") do
+      cmd(godot, ["--path", "project", "--import", "--quit-after", "5"])
+
+      {out, _} =
+        cmd(godot, ["--path", "project", "--script", "limits_host.gd", "--quit-after", "300"])
+
+      show(out, ~r/^(PASS|FAIL|RESULT: \d)/)
+      judge(out, ["RESULT: 0 falsified"])
+    end
+  end
+
   defp run(["limits"]) do
     witness = witness()
 
     with {:ok, rvlinux} <- env("RVLINUX"),
-         :ok <- build(["tests/limits.mojo", "limits"], MOJO_FLAGS: "-I #{witness}/src") do
+         :ok <- build(["tests/limits.mojo", "limits"], MOJO_FLAGS: "-I #{witness}/src -I src") do
       {out, _} = cmd(rvlinux, ["build/limits.elf"])
       show(out, ~r/.*/, 120)
 

@@ -11,7 +11,7 @@ Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link ste
 
 ## Public API
 
-`sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int`. The host must set `unboxed_arguments = false`, because the C glue reads Variant pointers, not native registers. Registration is only legal during the host's initialization, which is when `main` runs.
+`sigs/interactor-mojo-guest.sigs` lists what a host can call. Keep it in step with `sandbox_register_api`. Today that is `MojoGuest.add_numbers(int a, int b) -> int` and `MojoGuest.echo(Variant value) -> Variant`, which takes int, bool, float, string or object back out unchanged. The host must set `unboxed_arguments = false`, because the C glue reads Variant pointers, not native registers. Registration is only legal during the host's initialization, which is when `main` runs.
 
 ## Build and run
 
@@ -43,35 +43,35 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 
 ## What this does not have
 
-- One worker, so tasks interleave but never run in parallel. The test exercises `create_task` and `__await` from `std.runtime._asyncrt` (the stdlib marks async unfinished). `parallelize` is in `max.algorithm`, and I did not try it.
-- One public function, `add_numbers`, taking and returning ints. Other Variant types, strings and objects are not handled. It has not been called from a second `vmcall` after a reset, or with native (unboxed) arguments.
-- No CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
-- Only single-hart behaviour, and only a double-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for a single-precision one, which I did not run.
+- One worker by decision (n = 1), so tasks interleave but never run in parallel. `max.algorithm`'s `parallelize` does not build for a guest, because its multi-item branch enqueues onto a DeviceContext from the MAX driver. `src/guest_algorithm.mojo` is its one-worker path, which runs every item in order on the calling thread.
+- Native (unboxed) arguments to a `vmcall`. The host must set `unboxed_arguments = false`.
+- A `Wait_Timeout` that sleeps. With one worker it answers once the queue is empty.
+- A CI run of the Godot test. CI builds the ELF only, because the test needs a window and a Sandbox build.
+- A single-precision host. Build with `SANDBOX_VARIANT_SIZE=24` for one; I did not run it. The double host refuses that build, which I did run.
 
 ## The limits as tests
 
-Each limit below is a test that does not pass yet, so it can go green when the limit is lifted. `pixi run test-limits` runs the witness properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout at `../contract-witness-mojo`, or `WITNESS_REPO`; in a workspace it is `../../2-contract/witness-mojo`). It exits 1 while any limit is red, so it is not part of `pixi run test`, and CI does not run it. It exits 2 if a control goes red.
+`pixi run test-limits` runs contract-witness-mojo properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout, `../../2-contract/witness-mojo` in a workspace or `WITNESS_REPO`). `pixi run test-hostlimits` runs GDScript checks in the Sandbox build. A test that fails is a limit that still stands.
 
 | Limit | Test | Result today |
 |---|---|---|
-| INT Variants only (control) | `tests/limits.mojo` int round trip | passes |
-| bool Variants | bool round trip | red |
-| float Variants | float round trip | red |
-| string Variants | string round trip | red |
-| object Variants | object round trip | red |
-| One worker, no parallelism | more than one worker | red |
-| `Wait_Timeout` does not sleep | `Wait_Timeout` waits its deadline | skipped: the clock does not advance in rvlinux or in the Sandbox build |
-| Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, 100 tasks on one lock |
-| Native (unboxed) arguments | `project/limits_host.gd` unboxed vmcall | red |
-| A second `vmcall` after the first (control) | `project/limits_host.gd` repeated vmcall | passes |
+| Variant types: int | int round trip (control) | passes |
+| Variant types: bool, float, object | round trip of each | pass |
+| Variant types: string | string round trip, needs the host | passes in the Sandbox build, skipped in rvlinux, which has no host |
+| The same types through a real `vmcall` | `echo` of int, bool, float, string, object | pass in the Sandbox build |
+| One worker, n = 1 | worker count is one | passes |
+| `parallelize` on one worker | visits each item once | passes |
+| Spin locks use a stand-in waiter (control) | spin lock under tasks | passes, up to 50 tasks on one lock |
+| A second `vmcall` after the first (control) | repeated vmcall | passes |
+| `Wait_Timeout` does not sleep | waits its deadline | skipped: the clock does not advance in rvlinux or in the Sandbox build |
+| Native (unboxed) arguments | unboxed vmcall | red: returns null |
 
-The bool, float, string and object glue is declared in `runtime/sandbox_abi.c` and returns `-ENOSYS`, so each of those tests fails for that reason. The two GDScript checks are not witness properties, because a property runs in the guest and cannot choose how the host passes its arguments. Run them with `godot --path project --script limits_host.gd`.
+The Variant glue is in `runtime/sandbox_abi.c`. Bool, float and object travel in the payload. A string is created and fetched through the host's `ECALL_VCREATE` and `ECALL_VFETCH`. The string test needs `references_max` raised in the host, because each trial scopes one host variant and the default allows 100. `project/limits_run.gd` sets 20,000.
 
 Not written as tests, and why:
 
-- A single-precision host (`SANDBOX_VARIANT_SIZE=24`) needs a single-precision engine build, which I do not have.
+- A single-precision host needs a single-precision engine build, which I do not have.
 - A `Wait` on a chain nothing can complete aborts the whole guest, so a property cannot catch it.
-- `parallelize` is in `max.algorithm`. Importing it is a build error, not a failing property.
 - CI does not run the Godot test, and rvlinux has no Sandbox host. These are about where tests run, not about the guest.
 
 ## Licence
