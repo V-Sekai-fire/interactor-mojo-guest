@@ -18,6 +18,8 @@ Clone the sysroot repository beside this one (or set `SYSROOT_REPO`), then:
 
 `GODOT` is a double-precision editor build with the Sandbox module, for example the `godot.macos.editor.double.arm64` asset of a `V-Sekai-fire/entities-zone` release. The test opens a real window, never `--headless`, loads the ELF into a `Sandbox`, and judges by the guest's own `RESULT: fib(30) == 832040` and `RESULT: tasks sum == 33` lines and the absence of a Sandbox error. A build without the Sandbox class fails the test.
 
+For a run with no engine and no window, build `rvlinux` from [libriscv/libriscv-rs](https://github.com/libriscv/libriscv-rs) (safe Rust, BSD-3-Clause, pinned nightly) and run `RVLINUX=<binary> pixi run test-rvlinux`. It runs the same ELF as a Linux userspace guest in under a millisecond and judges by the same `RESULT` lines and the guest's exit code. It does not provide the Sandbox host API, so it cannot check the `.sandbox_variant` contract.
+
 ## The runtime fork
 
 `runtime/upstream/` holds `Globals.cpp`, `Memory.cpp`, `Memory.h` and `System.cpp` verbatim from `Mojo/lib/CompilerRT` in modular/modular at `e6e596ce` (Apache-2.0 with LLVM exceptions). That tree does not build on its own, because it includes headers that are not published (`Support/ADT/GlobalTable.h`, `Support/SymbolExport.h`, `AsyncRT/...`). What changed:
