@@ -3,7 +3,11 @@
 # the riscv64 glibc sysroot (V-Sekai-fire/repository-riscv64-sysroot).
 set -eu
 cd "$(dirname "$0")"
-SYSROOT_REPO="${SYSROOT_REPO:-../riscv64-sysroot}"
+# In the workspace the sysroot sits at 5-repository/riscv64-sysroot; a standalone clone has it beside it.
+if [ -z "${SYSROOT_REPO:-}" ]; then
+  if [ -d ../../5-repository/riscv64-sysroot ]; then SYSROOT_REPO=../../5-repository/riscv64-sysroot
+  else SYSROOT_REPO=../riscv64-sysroot; fi
+fi
 SYSROOT="$SYSROOT_REPO/sysroot"
 GCCLIB="$SYSROOT/lib/gcc-cross/14"
 [ -d "$SYSROOT" ] || { echo "no sysroot at $SYSROOT; clone repository-riscv64-sysroot or set SYSROOT_REPO" >&2; exit 1; }

@@ -15,7 +15,7 @@ Mojo cannot link a cross-compiled executable (`--emit exe` fails at the link ste
 
 ## Build and run
 
-Clone the sysroot repository beside this one (or set `SYSROOT_REPO`), then:
+In a workspace checkout the sysroot is found at `../../5-repository/riscv64-sysroot`. Standalone, clone the sysroot repository beside this one (or set `SYSROOT_REPO`). Then:
 
     pixi run build
     GODOT=<engine binary> pixi run test
@@ -48,7 +48,7 @@ Mojo is pinned to `1.3.0.dev2026111316`. RISC-V code generation was missing from
 
 ## The limits as tests
 
-Each limit below is a test that does not pass yet, so it can go green when the limit is lifted. `pixi run test-limits` runs the witness properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout at `../contract-witness-mojo`, or `WITNESS_REPO`). It exits 1 while any limit is red, so it is not part of `pixi run test`, and CI does not run it. It exits 2 if a control goes red.
+Each limit below is a test that does not pass yet, so it can go green when the limit is lifted. `pixi run test-limits` runs the witness properties in rvlinux (needs `RVLINUX` and a `contract-witness-mojo` checkout at `../contract-witness-mojo`, or `WITNESS_REPO`; in a workspace it is `../../2-contract/witness-mojo`). It exits 1 while any limit is red, so it is not part of `pixi run test`, and CI does not run it. It exits 2 if a control goes red.
 
 | Limit | Test | Result today |
 |---|---|---|

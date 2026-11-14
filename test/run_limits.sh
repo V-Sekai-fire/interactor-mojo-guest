@@ -7,7 +7,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 : "${RVLINUX:?set RVLINUX to the rvlinux binary}"
-WITNESS_REPO="${WITNESS_REPO:-../contract-witness-mojo}"
+if [ -z "${WITNESS_REPO:-}" ]; then
+  if [ -d ../../2-contract/witness-mojo ]; then WITNESS_REPO=../../2-contract/witness-mojo
+  else WITNESS_REPO=../contract-witness-mojo; fi
+fi
 MOJO_FLAGS="-I $WITNESS_REPO/src" ./build.sh tests/limits.mojo limits >/dev/null
 out=$("$RVLINUX" build/limits.elf 2>&1) || true
 printf '%s\n' "$out" | cut -c1-120
